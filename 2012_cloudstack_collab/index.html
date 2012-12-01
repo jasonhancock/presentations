@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <title>Running Puppet on Cloudstack Instances</title>
+    <link href="stylesheet.css" rel="stylesheet" />
+</head>
+<body>
+<div id="impress" class="impress-not-supported">
+
+<div class="fallback-message">
+        <p>Your browser <b>doesn't support the features required</b> by 
+        impress.js, so you are presented with a simplified version of
+        this presentation.</p>
+
+        <p>For the best experience please use the latest <b>Chrome</b>
+        or <b>Safari</b> browser. Firefox 10 (to be released soon)
+        will also handle it.</p>
+</div>
+
+
+<div class="step" style="text-align: center" data-x="-2160" data-y="150">
+    <h2 id="title">Running Puppet on Cloudstack Instances</h2>
+    <h3><a href="mailto:jason@jasonhancock.com">jason@jasonhancock.com</a></h3>
+    <h3>@jsnby</h3>
+    <h3><a href="http://geek.jasonhancock.com">http://geek.jasonhancock.com</a></h3>
+    <h3>December 2012</h3>
+</div>
+
+
+<div class="step" data-x="-1000" data-y="150" data-rotate="90">
+    <h1>Goals:</h1>
+    <ul>
+        <li>Do NOT use Puppet's auto-signing feature</li>
+        <li>Instances receive all config via Puppet</li>
+        <li>Minimize the number of CloudStack templates</li>
+        <li>No manual intervention</li>
+    </ul>
+</div>
+
+
+<div class="step" data-x"-1000" data-y="150">
+    <h2>Translation:</h2>
+    <p>Make one API call to launch the VM, the automation takes over and puts
+    the box into production (or dev, or QA).</p>
+</div>
+
+
+<div class="step" data-x="0" data-y="-900" data-rotate="-90">
+    <h1>Puppet's auto cert signing</h1>
+    <ul>
+        <li>Automatically signs any certificate from a given domain</li>
+        <li>Exposes a vulnerability because anyone that can connect to the
+        puppet master can have a cert signed for that domain</li>
+    </ul>
+</div>
+
+
+<div class="step" data-x="1200" data-y="-900">
+    <h1>Working around auto-signing:</h1>
+    <p>I decided to seed a pre-signed certificate into the templates. Ran into
+    a couple of issues though...</p>
+</div>
+
+
+<div class="step slide" data-x="1000" data-y="0">
+    <p><strong>/etc/puppet/puppet.conf</strong> on the client:</p>
+
+    <pre>
+    [agent]
+    ...
+    certname = mycert001
+    node_name = facter
+    node_name_fact = fqdn
+    </pre>
+
+    <p style="font-size: .8em">The <span class="mono">node_name</span> and
+    <span class="mono">node_name_fact</span> settings were necessary because the
+    Puppet client thought it's node name was &quot;mycert001&quot;.</p> 
+
+</div>
+
+
+<div class="step slide" data-x="2000" data-y="0">
+    <p style="margin-bottom: 0px;">Had to modify <strong>/etc/puppet/auth.conf</strong> on the Puppet master.
+    Details about why and what to change found in issue
+    <a href="https://projects.puppetlabs.com/issues/2128" target="_blank">2128</a>:</p>
+<pre style="margin-top: 10px">
+# allow nodes to retrieve their own catalog
+path ~ ^/catalog/([^/]+)$
+method find
+allow *
+#allow $1
+
+# allow nodes to retrieve their own node definition
+path ~ ^/node/([^/]+)$
+method find
+allow *
+#allow $1
+</pre>
+</div>
+
+
+<div class="step" data-x="0" data-y="1200" data-scale="2">
+    <h2>Run Puppet as soon as the box starts:</h2>
+    <ul>
+        <li>Turn off splay!</li>
+        <li>chkconfig Puppet on!</li>
+    </ul>
+</div>
+
+
+<div class="step" data-x="0" data-y="2000" style="text-align: center">
+    <h2>Let's talk about node classification!</h2>
+</div>
+
+
+<div class="step" data-x="-850" data-y="2500" data-rotate="90">
+    <h1>A few ways:</h1>
+    <ul>
+        <li>{site,node}.pp</li>
+        <li>Hostname regex</li>
+        <li>Dashboard/Puppet Enterprise</li>
+        <li>Using an ENC script</li>
+        <li>Use facts</li>
+        <li>Probably other ways too!</li>
+    </ul>
+</div>
+
+
+<div class="step" data-x="-1800" data-y="2500">
+    <h1>Why use facts?</h1>
+    They are <b>first class citizens</b> in the Puppet ecosystem.
+</div>
+
+
+<div class="step" data-x="1500" data-y="1200" data-rotate="90">
+    Passing a <span class="mono">$::role</span> (and other facts) to Puppet.
+</div>
+
+
+<div class="step" data-x="1500" data-y="2000">
+    <p>Use CloudStack's user-data to store key=value pairs (up to 2KB) that get loaded into
+    facts on the puppet client</p>
+</div>
+
+
+<div class="step" data-x="2600" data-y="2300">
+    <h2>Example user-data:</h2>
+<pre>
+role=webserver
+location=datacenter1
+environment=production
+</pre>
+</div>
+
+
+<div class="step" data-x="1500" data-y="3000">
+    Code to load user-data into facts is available on 
+    <a href="http://geek.jasonhancock.com/2011/11/09/cloudstack-userdata-into-puppet-facts">Github</a>.
+</div>
+
+
+<div class="step" data-x="4500" data-y="2000" data-scale="4" data-rotate="45">
+    Implementing <span class="mono">$::role</span> in the Puppet code.
+</div>
+
+
+<div class="step" data-x="2000" data-y="4000" data-rotate="-90">
+    <p>Everyone is a default node. We don't have to worry about adding nodes to
+    site.pp, conforming to a host naming convention, or adding meta-data to 
+    an ENC.</p>
+</div> 
+
+
+<div class="step slide" data-x="0" data-y="4000">
+    <p>Our simplified<sup>*</sup> <strong>site.pp:</strong></p>
+    <pre>
+import 'base'
+
+node default {
+  include base
+}
+</pre>
+    <p style="font-size: .7em"><sup>*</sup>Irrelevant stuff omitted for clarity</p>
+</div>
+
+
+<div class="step slide" data-x="1000" data-y="4000">
+    <p> Excerpts from <strong>base.pp:</strong>
+    <pre>
+class base {
+  # Includes that apply to all machines
+  
+  case $::role {
+    'somerole': {
+      include somerole
+    }
+    'otherrole': {
+      include otherrole
+    }
+  }
+}
+</pre>
+</div>
+
+
+<div class="step" data-x="0" data-y="3000" data-rotate="-90">
+    What about <span class="mono">$::environment</span>? Don't forget dev/qa/staging nodes!
+</div>
+
+
+<div class="step" data-x="-850" data-y="4000" data-rotate="-90">
+    Passing the Puppet environment as a fact proves to be tricky.
+    File-serving and plugin-sync don't quite work as you might expect.
+</div>
+
+
+<div class="step" data-x="-850" data-y="5500" data-rotate="-90">
+    To solve those issues, I created something called cloudstart 
+    (find it on <a href="">Github</a>). It's similar to cloud-init but simpler.
+</div>
+
+
+<div class="step" data-x="0" data-y="5500">
+    <h2>Why not just use cloud-init?</h2>
+    <ul>
+        <li>Every byte of user-data is precious</li>
+        <li>Wanted plugins to be scripting language agnostic</li>
+        <li>Simple</li>
+    </ul>
+</div>
+
+
+<div class="step" data-x="3000" data-y="3600">
+    You can pass the environment the same way we set $::role, by adding another
+    key/value pair to the user-data (key == "environment"). 
+</div>
+
+
+<div class="step" data-x="-1800" data-y="4000" style="text-align: center">
+    <h2>Stored Configurations</h2>
+</div>
+
+
+<div class="step" data-x="-3000" data-y="4000" style="text-align: center">
+    <b>&lt;Plug&gt;</b>PuppetDB<b>&lt;/Plug&gt;</b> <br /><br />
+    <img src="catalog_compilation.png" />
+</div>
+
+
+<div class="step" data-x="-4200" data-y="3000">
+    If you're using PuppetDB, you should use Erik Dalen's
+    puppetdbquery module (available on the <a href="http://forge.puppetlabs.com/dalen/puppetdbquery">Puppet Forge</a>)
+</div>
+
+
+<div class="step" data-x="-3000" data-y="3000" data-rotate="-45">
+    <h2>Stored Configurations Use Case:</h2>
+    Automatically add nodes to Nagios
+</div>
+
+
+<div class="step" data-x="-4200" data-y="2000">
+<pre>
+@@nagios_host { $::fqdn:
+  ensure     =&gt; present,
+  address    =&gt; $::ipaddress_eth0,
+  use        =&gt; 'linux-server',
+  hostgroups =&gt; 'Linux Servers',
+}
+</pre>
+</div>
+
+
+<div class="step" data-x="-4500" data-y="4000" style="text-align: center">
+    <h2>Cleanup!</h2>
+</div>
+
+
+<div class="step" data-x="-4000" data-y="1000">
+    But now we're working in the cloud. So we destory/terminate that instance...
+</div>
+
+
+<div class="step" data-x="-2500" data-y="1000">
+    And your phone is blowing up with Nagios alerts
+</div>
+
+
+<div class="step" data-x="-4000" data-y="0" data-rotate="-90">
+    Compare &quot;active&quot; nodes in PuppetDB vs. hosts running in the cloud, deactivating any
+    hosts in PuppetDB that are no longer running (have been terminated).
+</div>
+
+
+<div class="step" data-x="-4000" data-y="-1200" data-rotate="-90">
+    <h2>Deactivating a node in PuppetDB</h2>
+    On the Puppetmaster:
+    <pre>
+puppet node deactivate &lt;hostname&gt;
+</pre>
+</div>
+
+
+<div class="step" data-x="-3800" data-y="5000">
+    That deactivated it from PuppetDB. What about actually cleaning up the Nagios host?
+</div>
+
+
+<div class="step" data-x="-3800" data-y="6000">
+    Purge un-puppet-managed resources from your Nagios host:
+<pre>
+resources { 'nagios_host':
+  purge  => true,
+}
+</pre>
+</div>
+
+
+<div class="step" data-x="-2500" data-y="7000" data-scale="2">
+    This presentation is available at:<br />
+    <a href="https://github.com/jasonhancock/presentations">https://github.com/jasonhancock/presentations</a>
+</div>
+
+
+<div class="step" data-x="0" data-y="2000" data-scale="10">
+</div>
+
+</div><!-- impress -->
+
+<script src="impress.js"></script>
+
+</body>
+</html>
