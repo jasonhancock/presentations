@@ -1,0 +1,14 @@
+digraph {
+    fontsize=8;
+    rankdir=LR;
+
+    compound=true;
+
+    graph [dpi="216"];
+
+    node [shape="Mrecord", fontsize=8];
+    agent [label="puppet-agent"];
+    master [label="puppetserver"];
+
+    agent->master [label="CSR"];
+}

@@ -1,0 +1,12 @@
+# render with https://bramp.github.io/js-sequence-diagrams/
+client->puppetmaster: client connects, cert validated
+puppetmaster->client: plugins sync'ed from master
+Note left of client: client evaluates facts
+client->puppetmaster: fact evaluation results
+puppetmaster->puppetdb: replace facts
+Note right of puppetmaster: puppetmaster compiles catalog
+puppetmaster->puppetdb: replace catalog
+puppetmaster->client: compiled catalog
+Note left of client: client applies catalog
+client->puppetmaster: client sends report to master
+puppetmaster->puppetdb: store report

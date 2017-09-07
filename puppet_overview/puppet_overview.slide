@@ -1,0 +1,470 @@
+Puppet Overview
+
+Jason Hancock
+@jsnby
+
+* What is Configuration Management?
+
+- A way to (idempotently) configure a machine with desired software, services and configuration.
+
+* Why idempotence?
+
+- Repeatable, reliable, deterministic results.
+
+* What is Puppet?
+
+- Declarative Configuration Management Platform
+- Has it's own Domain Specific Language (DSL)
+- An "Infrastructure-As-Code" tool
+- Centrally compiled
+
+: You describe the state the system is supposed to be in, Puppet tries to converge the system to that state
+: Works with Resources
+: more on central compilation later
+
+* Alternatives to Puppet
+
+- CFEngine
+- Chef
+- Ansible
+- SaltStack
+- MGMT (newish project, written in Go)
+- Bash Scripts
+- Others
+
+* Puppet architecture
+
+.image images/graphs/puppet_arch.png
+
+: puppet-agent runs on the server you are configuring
+: puppetdb is optional
+
+* Web UI's
+
+There are a number of web frontends for Puppet. Some do more than others.
+- Puppet Enterprise: PE has it’s own dashboard loaded with features
+- [[https://theforeman.org/][Foreman]]: Tries to be the open source PE dashboard
+- [[https://github.com/puppetlabs/puppetlabs-dashboard][Puppet Dashboard]]: Old, open-source project, doesn’t scale well, mostly deprecated
+- [[http://demo.puppetexplorer.io/#/dashboard][Puppet Explorer]]: Open source, From Spotify. Angular app that interacts with PuppetDB via the API, only requires static asset hosting
+- Multiple Others
+
+* Web Frontends
+
+Opinion: They’re nice to have, but not essential.
+
+: Nice for reporting, but driving any sort of config from the dashboard sort of goes against the grain of infrastructure-as-code
+
+* Security: Certificates and Auth
+
+Puppet uses SSL certificates for mutual authentication
+
+.image images/graphs/puppet_csr.png
+
+When the client starts up for the first time, it generates a Certificate Signing Request (CSR) and sends it to the Puppetmaster
+
+: checksum displayed on the client. Same checksum displayed on the master so you can validate it came from your server.
+: mutual auth: client validates that server is ok to talk to, server validates client is okay to receive connection from
+
+* Security: Certs and Auth (continued)
+
+.image images/graphs/puppet_cert.png
+
+Once the certificate has been signed, the next time the client connects, it caches a copy of the signed certificate. It is this certificate that will be used to communicate with the puppetmaster moving forward.
+
+* Automating Certificate Signing
+
+There are ways to automate certificate signing:
+- If you trust the network, you can simply wildcard hostnames within a domain (eg. *.example.com) and any hosts will automatically get signed.
+- Use [[https://docs.puppet.com/puppet/latest/ssl_autosign.html#policy-based-autosigning][Policy Based Autosigning]]
+- Projects like [[https://github.com/jasonhancock/autosignr][Autosignr]] (Autosignr can run as a Custom Policy Executable)
+
+* Terminology/Jargon
+
+* The Catalog
+
+- The catalog is an acyclic directed graph of ALL of the resources declared for a node.
+- Instructs the client on what the state of the system should be, and in what order to evaluate the resources.
+
+* Facts
+
+- Facts are information about the system, generated on the client, that can be accessed programatically like variables
+- First-class citizens in the Puppet eco-system
+- Extensible
+
+There are some "trusted" facts generated on the server, mainly dealing with information about the certificate used by the client.
+
+: first-class citizens: they're exposed as top-scope variables in manifests, avaialble in PuppetDB, etc.
+: trusted facts: stuff you don't want to be overwritten by the client
+
+* Example Facts
+- fqdn: client.example.com
+- kernelrelease: 3.10.0-229.el7.x86_64
+- lsbmajdistrelease: '7’
+- lsbminordistrelease: '1'
+- memorysize_mb: 993.3203125
+- osfamily: RedHat
+- processorcount: 1
+
+These are exposed as top-scope variables and can be used to drive your configuration:
+
+    $::processorcount
+
+* Structured Facts
+
+Some facts are structured into hashes or arrays. Examples include network interfaces, partitions, mounts, etc.
+
+Access to structured data via the top-scope $::facts hash:
+
+    $::facts[‘mountpoints’][‘/’][‘size’]
+
+* Resources
+
+Things are modeled as resources to Puppet. This includes Files, Packages, Services, Commands, Cronjobs, SSH keys, etc.
+
+    file { '/tmp/foo':
+      ensure  => present,
+      content => 'bar',
+    }
+
+* Anatomy of a Resource
+
+    file { '/tmp/foo':
+      ensure  => present,
+      content => 'bar',
+    }
+
+- *file* is the resource type
+- */tmp/foo* is the resource's name
+- *ensure* and *content* are attributes
+
+Lots of built-in types. See the [[https://docs.puppet.com/puppet/latest/type.html][Type Reference]] for the most up to date list of supported built in types and the attributes available for each type.
+
+* Running Puppet
+
+* Anatomy of a Puppet Run
+
+.image images/sequences/puppet_flow.svg
+
+* Code
+
+* Duplicate Resources
+
+Can’t have two resources with the same name
+
+Example: Only one module should declare a Package resource for the httpd (Apache Web Server) package.
+
+* Dependencies
+
+Resources can have dependencies between them.
+
+Example: Apache package and httpd.conf. You want to install the Apache package before you manage the httpd.conf file
+
+* Dependencies (cont'd.)
+
+    package { 'httpd':
+      ensure => installed,
+    }
+    
+    file { '/etc/httpd/conf/httpd.conf':
+      source => 'puppet:///modules/apache/httpd.conf',
+      require => Package['httpd'],
+      notify  => Service['httpd'],
+    }
+    
+    service { 'httpd':
+      ensure  => running,
+      enable  => true,
+      require => File['/etc/httpd/conf/httpd.conf'],
+    }
+
+: three resources defined: package, file, service
+: config file requires the package, so installed first
+: service requires config file
+
+* Common Pattern
+
+The pattern on the previous slide is *very* common. It has a name: The Package, File, Service pattern
+
+* Resource arrangement
+
+Resources can be arranted into classes and user-defined types. This promotes code reuse
+
+    class apache {
+      package { 'httpd':
+        ...
+      }
+    
+      file { '/etc/httpd/conf/httpd.conf':
+        ...
+      }
+    
+      service { 'httpd':
+        ...
+      }
+    }
+
+* Classes
+
+Classes can be included by other classes or directly in node blocks:
+
+    node 'foo.example.com' {
+      include apache
+    }
+
+* Alternate Class include syntax
+
+    node 'foo.example.com' {
+      class { 'apache': }
+    }
+
+Useful when changing class parameters
+
+* Classes support inheritance
+
+Although classes do support inheritance, use of inheritance is generally discouraged except in a few specific use cases. Use composition instead.
+
+* Fully-qualifying names
+
+You should use fully qualified names when referencing classes and top-scope variables (like facts)
+
+    node 'foo.example.com' {
+      include ::apache
+    }
+
+    $::processorcount
+
+: Do that by adding the double colon in front of the class name
+
+* Defined Types
+
+You can create user-defined types which are a collection of resources that can be instantiated multiple times
+
+Think apache vhost vs. apache server
+- You might only have a single apache server, but you’ll have several apache vhosts
+
+* Defined Type Example
+
+Declare the type:
+
+    define apache::vhost ($port, $docroot) {
+      file { "/etc/httpd/conf.d/vhost-${name}.conf":
+        ensure => present,
+        content => template('apache/vhost.erb'),
+        require => package['httpd'],
+        notify  => Service['httpd'],
+      }
+      file { $docroot:
+        ...
+      }
+    }
+
+Instantiate it:
+
+    apache::vhost { 'example.com':
+      port    => '80',
+      docroot => '/var/www/example.com',
+    }
+
+* Modules
+
+A *module* is a collection of classes and defined types related to a specific thing.
+
+Lots of pre-built modules exist on the [[https://forge.puppet.com][PuppetForge]].
+- Be wary of the quality
+- Look for the official recommended/approved modules from Puppet first
+
+* Templating
+
+Puppet supports two templating languages:
+- Ruby's ERB templates
+  - from the template, you have access to all local-scoped and top-scoped variables
+- Puppet's EPP templates
+  - Easier to re-use templates in the same scope because you explicitly pass the variables to the template
+
+: Think of EPP as "less magical"
+: ERB templates easier to work with except in the few places/sitations where EPP shines
+
+* ERB Template Example: resolv.conf
+
+  domain <%= @domainname %>
+  
+  <% if !@searchpath.empty? %>search <%= @searchpath.join(" ") %>
+  <% end -%>
+  
+  <% @nameservers.each do |ns| %>nameserver <%= ns %>
+  <% end -%>
+
+Example output:
+
+  search example.com
+  nameserver 8.8.8.8
+  nameserver 8.8.4.4
+
+: access a local variable @domainname
+: use of conditionals to check if a local variable has been set @searchpath, then use join function
+: iterating an array of nameservers
+
+* Package management for Puppet
+
+Like most languages, Puppet has a package manager to pull down modules from the Forge. Generally speaking, two options exist:
+
+- librarian-puppet
+- r10k
+
+<opinion>I prefer librarian-puppet as it has a less opinionated workflow and conforms more to the philosophy of small, sharp tools.</opinion>
+
+* Data
+
+* Parameterized Classes
+
+It’s possible to feed data into classes
+
+  class apache (
+    $package_name = 'httpd'
+  ) {
+    package { $package_name:
+      ensure => installed,
+    }
+  }
+
+: In this example, $package_name defaults to ‘httpd’, but you can override that if necessary (for example, if on a Debian derived system).
+
+* Building on our last example:
+
+  # This is a selector
+  $pkg = $::osfamily ? {
+    'Redhat' => 'httpd',
+    'Debian' => 'apache2',
+    ...
+    default  => 'httpd',
+  }
+  
+  class { '::apache':
+    package_name => $pkg,
+  }
+
+: Does the selector syntax remind you of anything? Ternary operator
+
+* Hiera
+
+- Hiera is a hierarchical data store.
+- Yaml files in a hierarchy that you define
+- Class parameters are implicitly looked up in Hiera if not explicitly defined, before using a default value.
+
+: BIG WIN: Separates data from the code
+
+* Hiera - continued
+
+The hierarchy allows you to override values in a programmatic way based on facts (role, OS, architecture, environment, etc.)
+
+Example hierarchy definition:
+
+  :hierarchy:
+    - "nodes/%{::trusted.certname}"
+    - "%{::environment}"
+    - common
+
+: three levels defined here allow us to override for a specific node, or a specific environment (production) before falling back to the common definitions
+
+* Hiera - Secrets
+
+Hiera supports pluggable backends.
+We use the *eyaml* backend to encrypt secrets before they are committed to our VCS
+  - public key used to encrypt, private key only exists on the Puppetmaster
+  - safe to commit secrets to VCS
+
+* Node Classification
+
+* Node Classification - What is it?
+
+The process by which code gets selectively applied to nodes
+
+* Simple Approach - Node Blocks
+
+  node 'foo.example.com' {
+    class { 'apache': }
+  }
+
+- Requires one node block per machine
+- Supports wildcard (first node block that matches is used)
+- Doesn't scale very well
+
+: Doesn't scale well in dynamic environments
+
+* External Node Classifier (ENC)
+
+A script/binary that gets given the FQDN and is supposed to respond with a yaml doc containing the classes to apply to the nodes
+
+Foreman and the Puppet Dashboard are just fancy ENC's
+
+: downfall here is debugging...you have to look at the output of the ENC to know what's going on
+
+* Fact-Based Node Classification
+
+Because facts are extensible, we can create a custom fact to load a server's role from:
+- AWS/Openstack userdata
+- a CMDB of some sort
+- a file on the local filesystem
+- a remote API
+- D). All of the above
+
+Because facts are first class citizens in the Puppet ecosystem, they are highly visible (in PuppetDB, in reports, in logs, etc.)
+
+: I've used Fact-based node classification exclusively for the last decade and it has never failed me
+
+* Fact-Based Node Classification - Default Node Block
+
+  node default {
+    include base
+  }
+
+: default node is special. Matches if no other blocks match
+
+* Fact-Based Node Classification - Base Module
+
+  class base {
+    if $::role {
+      class { "roles::${::role}": }
+    } else {
+      # use a notify so it shows up on the cli
+      notify { "the ::role fact was not set": }
+
+      # use warning fn so it shows up in logs
+      warning("the ::role fact was not set")
+    }
+  }
+
+: notice we're using the resource style class include syntax. This is because we can't interpolate a string when using the include statement
+
+* Style/CI/Testing/Dev
+
+* Style
+
+- [[https://docs.puppet.com/puppet/latest/style_guide.html][Official Style Guideline]] for writing Puppet code.
+- Enforced by [[http://puppet-lint.com/][puppet-lint]].
+
+* CI
+
+Checks we run in CI on every pull request:
+- puppet-lint
+- puppet syntax check
+- erb syntax check
+- epp syntax check
+- yaml keys alphabetized (Hiera)
+
+* Testing
+
+- There are some tools for testing modules like rspec-puppet, cucumber-puppet, etc.
+- I haven't really gotten into them
+
+* Dev
+
+We can spin up a dev stack including all components of Puppet (master, multiple agents, puppet DB, etc) via Vagrant
+
+* Summary
+
+* Final Thoughts
+
+.image images/iceberg.jpg
+.caption [[https://www.flickr.com/photos/safari_vacation/32306903126][Tip of the Iceberg]] by Ralph A. Clevenger. License: CC BY-NC 2.0
+
