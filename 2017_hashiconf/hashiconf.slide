@@ -190,8 +190,7 @@ Doing this allows us to configure jobs for any customer on a shared Nomad cluste
 
 * Flexibility - dev environment
 
-- Big advocate of local development environments
-- Full stack
+- Local full stack development environments
 - As close to production as possible
 
 * Dev env
