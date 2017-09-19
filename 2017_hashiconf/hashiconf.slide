@@ -101,6 +101,7 @@ We needed a way to share these backend processing nodes for multiple customers
 - Easy to operate
 - Easy to use API
 - Can schedule jobs based on CPU, Memory and Disk resources
+- Easy to integrate with existing infrastructure components
 
 : easy to operate...we were going to be deploying this everywhere (cloud, on-prem, etc.) and operational easy was a primary concern. We couldn't waltz into a new customer's infrastructure and expect them to deploy and manage a complicated solution
 : easy to use API - wanted to make the development experience as easy as possible
@@ -130,13 +131,29 @@ We needed a way to share these backend processing nodes for multiple customers
 
 If the docs weren't clear, there was a full client implementation (the Nomad CLI) to borrow from
 
+* Integration with existing infrastructure components
+
+Our biggest concern was centralized logging. We were able to add a wildcarded path to our filebeat configuration on the Nomad clients:
+
+    /data/nomad/alloc/*/alloc/logs/*.std*.*
+
+We also turned on telemetry in the Nomad configuration to get metrics to statsite which is then configured to send them to graphite:
+
+    {
+        "telemetry": {
+            "statsite_address": "statsite.example.com:8125"
+        },
+        ...
+    }
+
+
 * Re-architecting to use Nomad
 
 .image images/diagrams/with_nomad.png
 
 Decided the jobs running in containers wouldn't touch the source storage directly
 
-* Accessing the API
+* Accessing our API
 
 - Container is given a narrowly scoped OAuth token (scoped to a single source file)
 - Allows the job in the container to download the file and store the results for only that file
