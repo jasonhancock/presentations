@@ -24,7 +24,7 @@ up: down
 	docker logs -f $(container_name)
 
 console:
-	docker exec -t -i $(docker_image) /bin/bash
+	docker exec -t -i $(container_name) /bin/bash
 
 graphs:
 	mkdir -p images/{graphs,sequences}
