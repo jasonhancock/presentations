@@ -1,0 +1,23 @@
+@startuml
+actor user
+node API
+node s3
+node scheduler
+node nomad
+node backend1 [
+backend worker
+]
+database database
+user->API : process s3 bucket
+queue stage [
+files to process
+]
+API->stage
+API-up->s3
+API-down->database
+s3->API
+stage->scheduler
+scheduler->nomad
+nomad->backend1
+backend1->API
+@enduml

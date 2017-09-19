@@ -1,0 +1,200 @@
+Backend Batch Processing With Nomad
+http://bit.ly/jhancock_nomad
+19 Sep 2017
+
+Jason Hancock
+Operations Engineer, GrayMeta
+jason@jasonhancock.com
+https://jasonhancock.com
+@jsnby
+
+* Ops Engineer at GrayMeta
+
+.image images/GrayMeta.png
+.caption [[https://www.graymeta.com][graymeta.com]]
+
+* What we do...
+
+We index large filesystems, analyze content, extract metadata, etc.
+
+* Our Workload Composition
+
+Lots of backend jobs, essentially one job per file.
+
+Some jobs are small and fast, others are large and can take multiple hours to complete.
+
+: example: harvesting a 20kB jpeg vs a 3 hour 4k resolution video
+
+* Our original architecture
+
+.image images/diagrams/original.png
+
+: A user tells our API to process some storage like an s3 bucket.
+: We walk that filesystem, queuing up jobs to process
+: Our backend worker reads from the queue, process jobs, pushes results into the results queue
+: A persistence process reads jobs from the results queue, pushes them into the database through our API
+
+* Scaling the original architecture
+
+The original architecture scales horizontally
+
+.image images/diagrams/original_singlenode.png
+
+* Things were good, but we had operational issues
+
+Some customers have really large files, and our scheduling algorithm was "dump it into a queue and hope for the best"
+
+: A job could get launched on a box that didn't have enough disk and it would just fail.
+
+* To counter our lack of intelligent bin-packing
+
+We over-provisioned all our nodes on disk
+
+.image images/diagrams/overprovisioned.png
+
+* Our CFO wasn't pleased
+
+.image images/money_in_wallet.jpg
+.caption [[https://www.flickr.com/photos/68751915@N05/6722569541/][Money In Wallet]] by [[http://401kcalculator.org/][401kcalculator.org]], CC BY-SA 2.0
+
+* Other problems: Security
+
+We didn't have a defense against processing malicious content that exploited 3rd party vulnerabilities like [[https://imagetragick.com/][ImageTragick]]
+
+Our processing nodes had too much sensitive configuration data and could access the storage directly.
+
+* Other problems: maintenance
+
+- We can add nodes to the cluster easily
+- We didn't have a way to enable "drain" mode to pull machines out of rotation without killing any running jobs
+
+* Other problems: multi-tenancy
+
+Our architecture solved the problem for 1 customer. We scaled by adding dedicated resources for each customer:
+
+.image images/diagrams/multi_customers.png
+
+We were now scaling up and down multiple compute clusters on demand.
+
+* Other problems: multi-tenancy, idle machines
+
+Each customer required at least 1 worker, but often times they were idle.
+
+We needed a way to share these backend processing nodes for multiple customers
+
+: needed a way to scale the processing cluster up or down based on overall customer demand, (1 cluster to manage instead of 30 clusters to manage)
+
+* Coming around to a solution
+
+- Wanted to do the processing in a container with limited privileges/credentials
+- Wanted to try to solve a lot of the problems/pain points of our current architecture if possible
+- Wanted to avoid writing our own scheduling algorithms
+- Try to keep it simple
+
+* Started shopping for a container orchestrator
+
+.image images/shopping_cart.jpg
+.caption [[https://www.flickr.com/photos/drb62/4273903651/][Shopping Cart]] By Daniel R. Blume, CC BY-SA 2.0
+
+* Requirements
+
+- Easy to operate
+- Easy to use API
+- Can schedule jobs based on CPU, Memory and Disk resources
+
+: easy to operate...we were going to be deploying this everywhere (cloud, on-prem, etc.) and operational easy was a primary concern. We couldn't waltz into a new customer's infrastructure and expect them to deploy and manage a complicated solution
+: easy to use API - wanted to make the development experience as easy as possible
+: ability to schedule based on several dimensions, most important to us at the time was disk space
+
+* Nomad to the Rescue
+
+.image images/nomad.svg _ 400
+
+* What Nomad solved for us out-of-the-box
+
+- Easy to deploy/operate
+- Maintenance (removing/draining nodes)
+- Bin-packing
+.image images/diagrams/heterogeneous_nodes.png
+
+* Easy to use API
+
+.code launch.go /START 1OMIT/,/END 1OMIT/
+: Pretty easy to define a job using the Go client
+
+* Launch the job
+
+.code launch.go /START 2OMIT/,/END 2OMIT/
+
+* Nomad written in Go
+
+If the docs weren't clear, there was a full client implementation (the Nomad CLI) to borrow from
+
+* Re-architecting to use Nomad
+
+.image images/diagrams/with_nomad.png
+
+Decided the jobs running in containers wouldn't touch the source storage directly
+
+* Accessing the API
+
+- Container is given a narrowly scoped OAuth token (scoped to a single source file)
+- Allows the job in the container to download the file and store the results for only that file
+
+* Multi-tenancy
+
+We inject configuration into the container via environment variables
+
+- URLs of API endpoints
+- Auth token
+
+Doing this allows us to configure jobs for any customer on a shared Nomad cluster
+
+: use the same container image for all customers
+
+* Solved a lot of our problems
+
+- Security (never a solved problem) - better isolation
+- Maintenance
+- Reduced operational overhead (managing one cluster vs. multiple single-tenant clusters)
+- Heterogeneous nodes, more realistically provisioned
+- Better utilization of resources
+
+: We built an "unplaceable job" alert. We monitor for any jobs in Nomad's "pending" state that can't ever be placed due to the resources requested by the job vs. the resources available in the cluster
+
+* Flexibility - Other Container Schedulers?
+
+- Launch jobs in AWS ECS
+- Launch jobs in k8s?
+
+: Our code's written in Go.
+: We built our scheduler as an interface. So there's a Nomad implementation, an ECS implemenation, and we'll likely build a k8s implementation next.
+: allows us to swap implementations based on customer's needs
+
+* Flexibility - dev environment
+
+- Big advocate of local development environments
+- Full stack
+- As close to production as possible
+
+* Dev env
+
+- We use a monolithic Docker image that contains our full stack
+- Runs the same version of Nomad and Consul as production
+- We use the Nomad "raw_exec" driver
+
+: unless we're testing a new version of Nomad and/or Consul
+
+* Why raw_exec?
+
+- Avoids having to do something creative like Docker-in-Docker
+- Avoids having to bundle up our processing binary into a container image every time it's recompiled
+- Allows rapid iteration without faking anything.
+
+: confidence
+
+* Summary - Moving our batch processing to Nomad...
+
+- Required architectural changes that unlocked additional flexability in our platform
+- Saved us from having to implement a scheduler
+- Helped us better utilize compute resources
